@@ -22,5 +22,5 @@ fn main() {
         assert!(v[i] <= v[i + 1]);
     }
 
-    println!("Bump tests run OK!");
+    print!("Bump tests run OK!");
 }

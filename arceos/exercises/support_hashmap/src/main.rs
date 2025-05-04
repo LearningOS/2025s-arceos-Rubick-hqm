@@ -11,7 +11,7 @@ use std::collections::HashMap;
 fn main() {
     println!("Running memory tests...");
     test_hashmap();
-    println!("Memory tests run OK!");
+    print!("Memory tests run OK!");
 }
 
 fn test_hashmap() {
