@@ -165,6 +165,23 @@ impl VfsNodeOps for DirNode {
         }
     }
 
+    fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        let file_name = split_file(dst_path);
+        if file_name.is_none() {
+            return Err(VfsError::InvalidInput);
+        }
+        let file = file_name.unwrap();
+
+        let mut children = self.children.write();
+        let (name, _rest) = split_path(src_path);
+
+        let node = children.remove(name).ok_or(VfsError::NotFound)?;
+
+        children.insert(file.into(), node);
+
+        Ok(())
+    }
+
     axfs_vfs::impl_vfs_dir_default! {}
 }
 
@@ -173,4 +190,8 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     trimmed_path.find('/').map_or((trimmed_path, None), |n| {
         (&trimmed_path[..n], Some(&trimmed_path[n + 1..]))
     })
+}
+
+fn split_file(path: &str) -> Option<&str> {
+    path.rfind('/').map_or(None, |n| Some(&path[n + 1..]))
 }

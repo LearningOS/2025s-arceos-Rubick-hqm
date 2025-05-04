@@ -168,6 +168,6 @@ pub fn __print_impl(args: core::fmt::Arguments) {
         // with kernel logs
         arceos_api::stdio::ax_console_write_fmt(args).unwrap();
     } else {
-        stdout().lock().write_fmt(args).unwrap();
+        stdout().lock().write_fmt(with_color!(31, "{}", args)).unwrap();
     }
 }

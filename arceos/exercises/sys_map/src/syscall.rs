@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 
-use core::ffi::{c_void, c_char, c_int};
-use axhal::arch::TrapFrame;
-use axhal::trap::{register_trap_handler, SYSCALL};
+use arceos_posix_api::{self as api, get_file_like};
 use axerrno::LinuxError;
+use axhal::arch::TrapFrame;
+use axhal::paging::MappingFlags;
+use axhal::trap::{register_trap_handler, SYSCALL};
 use axtask::current;
 use axtask::TaskExtRef;
-use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use core::ffi::{c_char, c_int, c_void};
+use memory_addr::{MemoryAddr, VirtAddr, VirtAddrRange};
+use std::vec;
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -100,9 +102,14 @@ bitflags::bitflags! {
 fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ax_println!("handle_syscall [{}] ...", syscall_num);
     let ret = match syscall_num {
-         SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
+        SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
         SYS_SET_TID_ADDRESS => sys_set_tid_address(tf.arg0() as _),
-        SYS_OPENAT => sys_openat(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _, tf.arg3() as _),
+        SYS_OPENAT => sys_openat(
+            tf.arg0() as _,
+            tf.arg1() as _,
+            tf.arg2() as _,
+            tf.arg3() as _,
+        ),
         SYS_CLOSE => sys_close(tf.arg0() as _),
         SYS_READ => sys_read(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         SYS_WRITE => sys_write(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
@@ -110,11 +117,11 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
         SYS_EXIT_GROUP => {
             ax_println!("[SYS_EXIT_GROUP]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_EXIT => {
             ax_println!("[SYS_EXIT]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_MMAP => sys_mmap(
             tf.arg0() as _,
             tf.arg1() as _,
@@ -140,7 +147,42 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    syscall_body!(sys_mmap, {
+        let task = current();
+        let mut uspace = task.task_ext().aspace.lock();
+        let ustack_vaddr = uspace.end() - crate::USER_STACK_SIZE;
+        let start_va = uspace.find_free_area(
+            VirtAddr::from_mut_ptr_of(addr),
+            length,
+            VirtAddrRange::from_start_size(ustack_vaddr - length, length),
+        );
+
+        if let Some(start_va) = start_va {
+            let start_va: VirtAddr = start_va.align_down_4k();
+            let prot = MmapProt::from_bits(prot).unwrap();
+            let flags = prot.into();
+            if uspace
+                .map_alloc(start_va, length.align_up_4k(), flags, true)
+                .is_err()
+            {
+                ax_println!("map_alloc failed!");
+                return Err(LinuxError::ENOMEM)
+            }
+
+            
+            let mut buf = vec![0u8; length];
+            
+            get_file_like(fd)?.read(&mut buf)?;
+            if uspace.write(start_va, &buf).is_err() {
+                ax_println!("uspace write failed!");
+                return Err(LinuxError::EIO);
+            }
+            ax_println!("sys_mmap success");
+            Ok(start_va.as_usize() as isize)
+        } else {
+            Err(LinuxError::ENOMEM)
+        }
+    })
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
