@@ -3,9 +3,6 @@
 #![no_std]
 #![allow(unused_variables)]
 
-#[macro_use]
-extern crate log;
-
 use allocator::{AllocError, AllocResult, BaseAllocator, ByteAllocator};
 use core::alloc::Layout;
 use core::ptr::NonNull;
@@ -52,7 +49,6 @@ impl BaseAllocator for LabByteAllocator {
             assert!(self.pos_2 == self.end);
             self.end += size;
             self.pos_2 = self.end;
-            debug!("add_memory end: {:#x}", self.end);
         } else {
             return Err(AllocError::InvalidParam);
         }
@@ -65,27 +61,23 @@ impl ByteAllocator for LabByteAllocator {
         let align = layout.align();
         let size = layout.size();
         if align == 1 {
-            debug!("pos_1:{:#x}, pos_2:{:#x}", self.pos_1, self.pos_2);
-            if (self.pos_2 == self.end) & ((self.pos_2 - self.pos_1) < 0x1015BB) {
+            if (self.pos_2 == self.end) & ((self.pos_2 - self.pos_1) < 0x102000) {
                 return Err(AllocError::NoMemory);
-            }
-
-            if self.pos_1 >= self.pos_2 {
-                warn!("alloc layout: {:?}", layout);
-                panic!("sorry")
             }
 
             let ptr = if self.cnt % 2 == 1 {
                 let res = self.pos_1 as *mut u8;
                 self.pos_1 += size;
+                assert!(self.pos_1 < self.pos_2);
                 res
             } else {
-                let res = self.pos_2 as *mut u8;
                 self.pos_2 -= size;
+                let res = self.pos_2 as *mut u8;
+                assert!(self.pos_1 < self.pos_2);
                 res
             };
+
             self.cnt += 1;
-            debug!("ptr = {:#x}", ptr as usize);
             Ok(NonNull::new(ptr).unwrap())
         } else {
             match size {
@@ -106,11 +98,7 @@ impl ByteAllocator for LabByteAllocator {
     }
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
         let ptr = pos.as_ptr() as usize;
-        debug!(
-            "dealloc pos_1:{:#x}, pos_2:{:#x}, ptr:{:#x}, end: {:#x}, layout: {:?}",
-            self.pos_1, self.pos_2, ptr, self.end, layout
-        );
-        if ptr == self.pos_2 + layout.size() {
+        if ptr == self.pos_2 {
             self.pos_2 += layout.size();
             self.cnt = 0;
         } else if ptr == self.pos_1 - layout.size() {
@@ -118,7 +106,7 @@ impl ByteAllocator for LabByteAllocator {
         }
     }
     fn total_bytes(&self) -> usize {
-        0x1015BB - (self.pos_2 - self.pos_1)
+        0x1000
     }
     fn used_bytes(&self) -> usize {
         self.pos_1 - self.start + self.end - self.pos_2
